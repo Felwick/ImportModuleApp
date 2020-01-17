@@ -7,6 +7,7 @@ using CMS.IO;
 using CMS.Membership;
 using CMS.Modules;
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.IO.Compression;
@@ -28,6 +29,8 @@ namespace ImportModuleApp
             string packagePath = args[0] ?? "";
             string userName = args[1] ?? "";
             string applicationPath = args[2] ?? "";
+            bool moduleExport = false;
+            string moduleName = "";
 
             if (string.IsNullOrEmpty(packagePath))
             {
@@ -50,26 +53,84 @@ namespace ImportModuleApp
 
             ImportObject(packagePath, userName);
 
+            string objectType = "";
+            int objectID = 0;
+
+            SiteExportSettings siteExportSettings = new SiteExportSettings(UserInfoProvider.GetUserInfo(userName))
+            {
+                WebsitePath = SystemContext.WebApplicationPhysicalPath,
+                TargetPath = packagePath + "Export",
+                CreatePackage = true,
+                TargetFileName = $"ExportPackage_{DateTime.Now.ToString()}",
+                TemporaryFilesPath = "/path",
+                
+
+            };
+            //switch on one object vs global object selection
+            var selectedObjects = ObjectSelections(objectType);
+
+            if (objectID > 0)
+            {
+                var singleObject = SingleObjectSelection(objectID, selectedObjects);
+                siteExportSettings.Select(singleObject.TypeInfo.ObjectType,singleObject.TypeInfo.ObjectClassName,singleObject.TypeInfo.IsSiteObject);
+            }
+
+            if(moduleExport)
+            {
+                siteExportSettings.SetInfo(ImportExportHelper.MODULE_NAME, moduleName);
+            }
+            
+            siteExportSettings.Select(selectedObjects.TypeInfo.ObjectType, selectedObjects.TypeInfo.ObjectClassName, selectedObjects.TypeInfo.IsSiteObject);
+
+            //Preset for global object selection
+            siteExportSettings.SelectGlobalObjects(new List<string>(), "");
+
+            // Make sure no data is in temp folder (possibly from previous unsuccessful export)
+            ExportProvider.DeleteTemporaryFiles(siteExportSettings, true);
+            ExportManager exportManager = new ExportManager(siteExportSettings);
+            exportManager.Export(null);
+
+            //Cleanup
+            ExportProvider.DeleteTemporaryFiles(siteExportSettings, true);
+
+            return;
+        }
+
+        private static BaseInfo ObjectSelections(string objectType)
+        {
+            //Info Based on object type for type based filtering 
+            BaseInfo infoObj = ModuleManager.GetReadOnlyObject(objectType); 
+
+            return infoObj;
+
+        }
+
+        private static GeneralizedInfo SingleObjectSelection(int objectID, BaseInfo infoObj)
+        {
+            //object level filtering to lower levels
+            GeneralizedInfo exportObj = infoObj.GetObject(objectID);
+            return exportObj;
+
         }
 
         private static void ImportObject(string packagePath, string userName)
         {
             string objectType = "";
             int objectID = 0;
+
             SiteImportSettings settings = new SiteImportSettings(UserInfoProvider.GetUserInfo(userName));
             settings.UseAutomaticSiteForTranslation = true;
             settings.LogSynchronization = true;
             settings.WebsitePath = SystemContext.WebApplicationPhysicalPath;
             settings.SourceFilePath = packagePath;
 
-            //Info Based on object type for type based filtering 
-            BaseInfo infoObj = ModuleManager.GetReadOnlyObject(objectType);
+            var obj = ObjectSelections(objectType);
 
-            //object level filtering to lower levels
-            GeneralizedInfo exportObj = infoObj.GetObject(objectID);
-            if (exportObj.ObjectSiteID>0)
+            var importObj = SingleObjectSelection(objectID, obj);
+
+            if (importObj.ObjectSiteID>0)
             {
-                settings.SiteId = exportObj.ObjectSiteID;
+                settings.SiteId = importObj.ObjectSiteID;
                 settings.ExistingSite = true;
                 settings.SiteIsContentOnly = settings.SiteInfo.SiteIsContentOnly;
 
